@@ -21,6 +21,10 @@ LOCK = threading.Lock()
 def index():
     return render_template("index.html")
 
+@app.get("/healthz")
+def healthz():
+    return jsonify(ok=True)
+
 
 @app.get("/api/catalog")
 def catalog():
