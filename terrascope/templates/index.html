@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="generator" content="Code generated with AI assistance (Claude, Anthropic)">
+  <meta name="description" content="TerraScope: Earth system trend discovery using NASA POWER (MERRA-2) data. Built for NASA Space Apps Challenge 2026.">
+  <title>TerraScope</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<canvas id="stars" aria-hidden="true"></canvas>
+
+<div id="synth" class="synth" role="alert" hidden>&#9888; SYNTHETIC TEST DATA &mdash; NOT NASA MEASUREMENTS. Do not present these results as real. &#9888;</div>
+
+<header class="top">
+  <canvas id="rocket" class="art" aria-hidden="true"></canvas>
+  <div class="titles">
+    <h1>TERRASCOPE</h1>
+    <p class="sub">EARTH SYSTEM TREND DETECTIVE</p>
+    <p class="tag">What is changing? Where? By how much? Is it real?</p>
+  </div>
+  <canvas id="earth" class="art" aria-hidden="true"></canvas>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button class="tab on" data-tab="mission" role="tab">&#9658; MISSION CONTROL</button>
+  <button class="tab" data-tab="explorer" role="tab">&#9733; DATA EXPLORER</button>
+  <button class="tab" data-tab="monsoon" role="tab">&#9730; MONSOON MIRROR</button>
+  <button class="tab" data-tab="method" role="tab">&#9881; METHODS</button>
+</nav>
+
+<main>
+  <!-- ============ MISSION CONTROL ============ -->
+  <section id="tab-mission">
+    <div class="grid2">
+      <form id="form" class="px" onsubmit="return false">
+        <h2>1 &middot; CONFIGURE</h2>
+
+        <label for="variable">VARIABLE</label>
+        <select id="variable"></select>
+
+        <label for="season">SEASON</label>
+        <select id="season"></select>
+
+        <div class="row">
+          <div><label for="start">FROM</label><input id="start" type="number" min="1981"></div>
+          <div><label for="end">TO</label><input id="end" type="number"></div>
+        </div>
+
+        <label>WHERE</label>
+        <div class="radios">
+          <label class="rad"><input type="radio" name="scope" value="india" checked> India zones (30 sample points)</label>
+          <label class="rad"><input type="radio" name="scope" value="point"> Single point (click map)</label>
+          <label class="rad"><input type="radio" name="scope" value="box"> Custom box (click 2 corners)</label>
+        </div>
+        <div id="sc-point" class="row" hidden>
+          <div><label for="lat">LAT</label><input id="lat" type="number" step="0.01" value="10.00"></div>
+          <div><label for="lon">LON</label><input id="lon" type="number" step="0.01" value="76.00"></div>
+        </div>
+        <div id="sc-box" hidden>
+          <div class="row">
+            <div><label for="la0">LAT MIN</label><input id="la0" type="number" step="0.01" value="8"></div>
+            <div><label for="la1">LAT MAX</label><input id="la1" type="number" step="0.01" value="13"></div>
+          </div>
+          <div class="row">
+            <div><label for="lo0">LON MIN</label><input id="lo0" type="number" step="0.01" value="74"></div>
+            <div><label for="lo1">LON MAX</label><input id="lo1" type="number" step="0.01" value="78"></div>
+          </div>
+        </div>
+
+        <button id="run" class="btn big" type="button">LAUNCH ANALYSIS &#9658;</button>
+        <div id="busy" hidden>
+          <p id="busy-msg" class="busy">CONTACTING NASA POWER...</p>
+          <div class="bar"><i id="bar"></i></div>
+          <p class="hint">First run downloads data (can take 30-90 s). Repeat runs use the local cache.</p>
+        </div>
+        <p id="err" class="errbox" role="alert" hidden></p>
+        <p class="hint">Significance level &alpha; = 0.05. Trends are tested per location, then corrected for multiple testing (Benjamini&ndash;Hochberg).</p>
+      </form>
+
+      <div class="px mapbox">
+        <h2>2 &middot; WHERE</h2>
+        <div id="map" aria-label="Map of analysis locations and trends"></div>
+        <ul class="legend">
+          <li><b class="sw inc">&#9650;</b> significant increase</li>
+          <li><b class="sw dec">&#9660;</b> significant decrease</li>
+          <li><b class="sw non">&#9679;</b> no significant trend detected</li>
+          <li><b class="sw sam"></b> sample point (not yet analysed)</li>
+        </ul>
+      </div>
+    </div>
+
+    <div id="results" hidden>
+      <div id="warns"></div>
+      <div id="tiles" class="tiles"></div>
+      <div id="callout"></div>
+
+      <div class="px">
+        <h2>3 &middot; WHAT &amp; HOW MUCH</h2>
+        <p class="hint">Click a row to plot it. Tick boxes to compare up to 3 regions.</p>
+        <div class="scroll"><table id="ztable"></table></div>
+        <p class="hint" id="tablenote"></p>
+      </div>
+
+      <div class="px">
+        <h2>4 &middot; EVIDENCE</h2>
+        <label class="rad"><input type="checkbox" id="showlin"> also show linear regression line</label>
+        <div id="chart"></div>
+        <div id="cards" class="cards"></div>
+      </div>
+
+      <div class="px">
+        <h2>5 &middot; PROVENANCE &amp; EXPORT</h2>
+        <dl id="prov" class="prov"></dl>
+        <div class="row btns">
+          <button id="dl-csv" class="btn" type="button">&#8681; CSV</button>
+          <button id="dl-md" class="btn" type="button">&#8681; REPORT (.md)</button>
+          <button id="dl-print" class="btn" type="button">&#9112; PRINT</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ DATA EXPLORER ============ -->
+  <section id="tab-explorer" hidden>
+    <div class="px">
+      <h2>&#9733; VARIABLE CATALOG</h2>
+      <p>Search for what you care about: try <em>rain</em>, <em>heat</em> or <em>wind</em>.</p>
+      <input id="q" type="search" placeholder="search variables..." aria-label="Search variables">
+      <div id="chips" class="chips"></div>
+    </div>
+    <div id="vars" class="cards"></div>
+  </section>
+
+  <!-- ============ MONSOON MIRROR ============ -->
+  <section id="tab-monsoon" hidden>
+    <div class="px">
+      <h2>&#9730; MONSOON MIRROR</h2>
+      <p class="big">How has Indian monsoon rainfall changed since 1981, and do different regions behave differently?</p>
+      <p>Monsoon Mirror is a preconfigured investigation inside TerraScope. It uses the same engine as every other analysis, so nothing here is special-cased.</p>
+      <table class="kv">
+        <tr><th>Variable</th><td>Corrected precipitation (PRECTOTCORR)</td></tr>
+        <tr><th>Dataset</th><td>NASA POWER monthly API, MERRA-2 based</td></tr>
+        <tr><th>Season</th><td>June&ndash;September, rainfall total per year (mm)</td></tr>
+        <tr><th>Period</th><td id="mm-years">1981 &ndash; latest complete year</td></tr>
+        <tr><th>Regions</th><td>Northwest, Western, Central, Northeast, Southern India (6 sample points each)</td></tr>
+        <tr><th>Tests</th><td>Sen&rsquo;s slope, Mann&ndash;Kendall (autocorrelation-aware), Benjamini&ndash;Hochberg FDR</td></tr>
+      </table>
+      <p class="hint">No result is assumed in advance. Whatever the data shows is what gets reported, including &ldquo;no significant trend detected&rdquo;.</p>
+      <button id="mm-run" class="btn big" type="button">LAUNCH MONSOON MIRROR &#9658;</button>
+    </div>
+  </section>
+
+  <!-- ============ METHODS ============ -->
+  <section id="tab-method" hidden>
+    <div class="px">
+      <h2>&#9881; HOW IT WORKS</h2>
+      <ol class="steps">
+        <li><b>Fetch.</b> Monthly values come from the NASA POWER API (MERRA-2 based), one request per location, cached locally.</li>
+        <li><b>Check.</b> A season-year with <u>any</u> missing month becomes &ldquo;missing&rdquo;, never zero. At least 10 valid years are needed; below 20 you get a short-record warning.</li>
+        <li><b>Aggregate.</b> Rainfall: monthly mm/day &times; days in month, summed over the season. Other variables: day-weighted seasonal mean.</li>
+        <li><b>Estimate.</b> Sen&rsquo;s slope gives the trend size (robust to outliers) with a 95% confidence interval. Ordinary linear regression is shown for comparison.</li>
+        <li><b>Test.</b> Mann&ndash;Kendall tests for a monotonic trend. If lag-1 autocorrelation is significant and positive, the Hamed&ndash;Rao modified version is used, because plain Mann&ndash;Kendall over-reports trends in that case.</li>
+        <li><b>Correct.</b> Many locations are tested at once, so some would look &ldquo;significant&rdquo; by luck. Benjamini&ndash;Hochberg adjusted values (q) control that, and the map uses q, not raw p.</li>
+        <li><b>Compare.</b> Regions with significant trends in opposite directions are flagged.</li>
+      </ol>
+    </div>
+    <div class="px">
+      <h2>&#9888; READ THIS BEFORE QUOTING A RESULT</h2>
+      <ul class="steps">
+        <li>MERRA-2 is a <b>reanalysis</b> (model + observations), not a rain-gauge record. Its rainfall is corrected over land but is still an estimate.</li>
+        <li>Each India zone is a set of sample points, not a full wall-to-wall grid. Zone values are the plain average of its points.</li>
+        <li>&ldquo;No statistically significant trend detected&rdquo; does <b>not</b> mean &ldquo;no change&rdquo;. The record may simply be too short or too noisy to be sure.</li>
+        <li>A trend shows <b>what</b> changed, not <b>why</b>. Causes need separate evidence.</li>
+        <li>Results depend on the chosen period and season.</li>
+      </ul>
+    </div>
+    <div class="px">
+      <h2>&#9733; CREDITS &amp; AI DISCLOSURE</h2>
+      <ul class="steps">
+        <li>Data: NASA POWER project / MERRA-2 (NASA GMAO). TerraScope is an independent project, not affiliated with or endorsed by NASA.</li>
+        <li>Libraries: Flask, NumPy, SciPy, pymannkendall, Leaflet, Plotly, CARTO / OpenStreetMap map tiles. Fonts: Press Start 2P, VT323.</li>
+        <li>Pixel art (rocket, planet, stars) is drawn in code and contains no NASA branding.</li>
+        <li><b>AI use:</b> the application code was generated with AI assistance (Claude, Anthropic) and then run and tested by the team.</li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <p>Data: NASA POWER (MERRA-2) &middot; Independent project, not affiliated with or endorsed by NASA &middot; Built for NASA Space Apps Challenge 2026</p>
+</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.plot.ly/plotly-basic-2.35.2.min.js" charset="utf-8"></script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>
